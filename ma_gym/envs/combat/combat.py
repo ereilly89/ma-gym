@@ -7,6 +7,7 @@ import gym
 import numpy as np
 from gym import spaces
 from gym.utils import seeding
+from random import *
 
 from ..utils.action_space import MultiAgentActionSpace
 from ..utils.observation_space import MultiAgentObservationSpace
@@ -47,6 +48,7 @@ class Combat(gym.Env):
     def __init__(self, grid_shape=(15, 15), n_agents=5, n_opponents=5, init_health=3, full_observable=False,
                  step_cost=0, max_steps=100):
         self._grid_shape = grid_shape
+        self.n_terrain = min(grid_shape[0], grid_shape[1])
         self.n_agents = n_agents
         self._n_opponents = n_opponents
         self._max_steps = max_steps
@@ -56,6 +58,7 @@ class Combat(gym.Env):
         self.action_space = MultiAgentActionSpace(
             [spaces.Discrete(5 + self._n_opponents) for _ in range(self.n_agents)])
 
+        self.terrain_pos = {_: None for _ in range(self.n_terrain)}
         self.agent_pos = {_: None for _ in range(self.n_agents)}
         self.agent_prev_pos = {_: None for _ in range(self.n_agents)}
         self.opp_pos = {_: None for _ in range(self.n_agents)}
@@ -120,21 +123,61 @@ class Combat(gym.Env):
                 for col in range(0, 5):
 
                     if self.is_valid([row + (pos[0] - 2), col + (pos[1] - 2)]) and (
-                            PRE_IDS['empty'] not in self._full_obs[row + (pos[0] - 2)][col + (pos[1] - 2)]):
+                        PRE_IDS['empty'] not in self._full_obs[row + (pos[0] - 2)][col + (pos[1] - 2)]
+                    ):
                         x = self._full_obs[row + pos[0] - 2][col + pos[1] - 2]
-                        _type = 1 if PRE_IDS['agent'] in x else -1
+
+                        if PRE_IDS['agent'] in x:
+                            _type = 1
+                        elif PRE_IDS['terrain'] in x:
+                            _type = 2
+                        else:
+                            _type = -1
+
                         _id = int(x[1:]) - 1  # id
+
                         _agent_i_obs[0][row][col] = _type
+                        print("\n_type:" + str(_type))
+
                         _agent_i_obs[1][row][col] = _id
-                        _agent_i_obs[2][row][col] = self.agent_health[_id] if type == 1 else self.opp_health[_id]
-                        _agent_i_obs[3][row][col] = self._agent_cool[_id] if type == 1 else self._opp_cool[_id]
-                        _agent_i_obs[3][row][col] = 1 if _agent_i_obs[3][row][col] else -1  # cool/uncool
+
+                        if type == 1:
+                            _agent_i_obs[2][row][col] = self.agent_health[_id]
+                        elif type == -1:
+                            _agent_i_obs[2][row][col] = self.opp_health[_id]
+
+
+                        print("_id:" + str(_id))
+
+                        print("health:" + str(_agent_i_obs[2][row][col]))
+
+                        #_agent_i_obs[3][row][col] = self._agent_cool[_id] if type == 1 else self._opp_cool[_id]
+                        #_agent_i_obs[3][row][col] = 1 if _agent_i_obs[3][row][col] else -1  # cool/uncool
+
+                        if type == 1:
+                            _agent_i_obs[3][row][col] = self._agent_cool[_id]
+                        elif type == -1:
+                            _agent_i_obs[3][row][col] = self._opp_cool[_id]
+
+                        if type == 1 or type == -1:
+                            if _agent_i_obs[3][row][col]:
+                                _agent_i_obs[3][row][col] = 1
+                            else:
+                                _agent_i_obs[3][row][col] = -1
+
+                        print("cool down:" + str(_agent_i_obs[3][row][col]))
 
                         _agent_i_obs[4][row][col] = pos[0] / self._grid_shape[0]  # x-coordinate
+                        print("x coord:" + str(_agent_i_obs[4][row][col]))
+
                         _agent_i_obs[5][row][col] = pos[1] / self._grid_shape[1]  # y-coordinate
+                        print("y coord:" + str(_agent_i_obs[5][row][col]))
 
             _agent_i_obs = _agent_i_obs.flatten().tolist()
             _obs.append(_agent_i_obs)
+
+        for observation in _obs:
+            print(str(observation))
 
         return _obs
 
@@ -153,6 +196,9 @@ class Combat(gym.Env):
         self._full_obs[self.opp_prev_pos[opp_i][0]][self.opp_prev_pos[opp_i][1]] = PRE_IDS['empty']
         self._full_obs[self.opp_pos[opp_i][0]][self.opp_pos[opp_i][1]] = PRE_IDS['opponent'] + str(opp_i + 1)
 
+    def __update_terrain_view(self, terrain_i):
+        self._full_obs[self.terrain_pos[terrain_i][0]][self.terrain_pos[terrain_i][1]] = PRE_IDS['terrain'] + str(terrain_i + 1)
+
     def __init_full_obs(self):
         """ Each team consists of m = 5 agents and their initial positions are sampled uniformly in a 5 × 5
         square around the team center, which is picked uniformly in the grid.
@@ -162,6 +208,18 @@ class Combat(gym.Env):
         # select agent team center
         # Note : Leaving space from edges so as to have a 5x5 grid around it
         agent_team_center = self.np_random.randint(2, self._grid_shape[0] - 3), self.np_random.randint(2, self._grid_shape[1] - 3)
+
+        # randomly select terrain pos
+        numObstacles = min(self._grid_shape[1], self._grid_shape[0])
+        obstacle_i = 0
+        while obstacle_i < numObstacles:
+            pos = [randint(0, self._grid_shape[0] - 1),
+                   randint(0, self._grid_shape[1] - 1)]
+            if self._full_obs[pos[0]][pos[1]] == PRE_IDS['empty']:
+                self.terrain_pos[obstacle_i] = pos
+                self.__update_terrain_view(obstacle_i)
+                obstacle_i = obstacle_i + 1
+
         # randomly select agent pos
         for agent_i in range(self.n_agents):
             while True:
@@ -207,6 +265,10 @@ class Combat(gym.Env):
 
     def render(self, mode='human'):
         img = copy.copy(self._base_img)
+
+        # draw terrain
+        for terrain_i in range(self.n_terrain):
+            fill_cell(img, self.terrain_pos[terrain_i], cell_size=CELL_SIZE, fill=TERRAIN_COLOR)
 
         # draw agents
         for agent_i in range(self.n_agents):
@@ -449,6 +511,7 @@ CELL_SIZE = 15
 WALL_COLOR = 'black'
 AGENT_COLOR = 'red'
 OPPONENT_COLOR = 'blue'
+TERRAIN_COLOR = 'brown'
 
 ACTION_MEANING = {
     0: "DOWN",
@@ -460,6 +523,7 @@ ACTION_MEANING = {
 
 PRE_IDS = {
     'wall': 'W',
+    'terrain': 'T',
     'empty': '0',
     'agent': 'A',
     'opponent': 'X',

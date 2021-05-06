@@ -6,6 +6,7 @@
 /logs
 /dist
 /build
+/venv
 /examples/recordings
 *~
 
